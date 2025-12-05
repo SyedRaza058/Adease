@@ -39,20 +39,21 @@ export default function AdvertisementsPage() {
   const router = useRouter()
 
   // Fetch screens from Supabase
-  useEffect(() => {
-    const fetchScreens = async () => {
-      setLoadingScreens(true)
-      const { data, error } = await supabase
-        .from('adease_screens')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (error) {
-        console.error("Failed to fetch screens:", error.message)
-      } else if (data) {
-        setScreens(data as Screen[])
-      }
-      setLoadingScreens(false)
+  const fetchScreens = async () => {
+    setLoadingScreens(true)
+    const { data, error } = await supabase
+      .from('adease_screens')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) {
+      console.error("Failed to fetch screens:", error.message)
+    } else if (data) {
+      setScreens(data as Screen[])
     }
+    setLoadingScreens(false)
+  }
+
+  useEffect(() => {
     fetchScreens()
   }, [])
 
@@ -83,6 +84,8 @@ export default function AdvertisementsPage() {
   }, [screens])
 
   const handleAddAdvertisement = async () => {
+    // Refresh screens to get any newly created screens
+    await fetchScreens()
     await fetchAdvertisements()
     setIsModalOpen(false)
   }
@@ -124,13 +127,20 @@ const deleteAdvertisement = async (adId: string) => {
     return advertisements.filter((ad) => ad.screen_id === screenId)
   }
 
-  const handlePreview = (ad:any) => {
-    const screen = screens.find(screen => screen.id === ad.screen_id)
-    if (!screen) {
-      alert('Screen not found for this advertisement')
+  const handlePreview = async (ad:any) => {
+    // Refresh screens to ensure we have the latest data
+    const { data: screensData, error } = await supabase
+      .from('adease_screens')
+      .select('*')
+      .eq('id', ad.screen_id)
+      .single()
+    
+    if (error || !screensData) {
+      alert('Screen not found for this advertisement. Please refresh the page.')
       return
     }
-    if(!screen.is_active) {
+    
+    if(!screensData.is_active) {
       alert('Screen is not Active')
       return
     }
@@ -149,7 +159,11 @@ const deleteAdvertisement = async (adId: string) => {
           <h1 className="text-3xl font-bold">Advertisements</h1>
           <p className="text-gray-600 mt-1">Manage advertisements across all your screens</p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="flex items-center gap-2 bg-[#ED7614] hover:bg-orange-500 cursor-pointer">
+        <Button onClick={async () => {
+          // Refresh screens before opening modal to get latest screens
+          await fetchScreens()
+          setIsModalOpen(true)
+        }} className="flex items-center gap-2 bg-[#ED7614] hover:bg-orange-500 cursor-pointer">
           <Plus size={16} />
           Add Advertisement
         </Button>
@@ -204,7 +218,10 @@ const deleteAdvertisement = async (adId: string) => {
               <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-4 text-lg font-medium">No advertisements created yet</h3>
               <p className="mt-2 text-gray-500">Create your first advertisement to display on your screens.</p>
-              <Button onClick={() => setIsModalOpen(true)} className="mt-4 bg-[#ED7614] hover:bg-orange-500 cursor-pointer">
+              <Button onClick={async () => {
+                await fetchScreens()
+                setIsModalOpen(true)
+              }} className="mt-4 bg-[#ED7614] hover:bg-orange-500 cursor-pointer">
                 <Plus size={16} className="mr-2" />
                 Create Your First Advertisement
               </Button>
