@@ -23,6 +23,7 @@ interface Advertisement {
   title: string
   screen_id: string
   image_url: string
+  duration: number
   created_at: string
 }
 
@@ -144,12 +145,14 @@ const deleteAdvertisement = async (adId: string) => {
       alert('Screen is not Active')
       return
     }
-    window.open(`/ad/${ad.id}`, "_blank")
+    // Use screen_id instead of ad_id to show all ads for the screen
+    window.open(`/ad/${ad.screen_id}`, "_blank")
   }
-  const handleCopy = (adId: string) => {
-    const url = `${window.location.origin}/ad/${adId}`
+  const handleCopy = (ad: AdvertisementWithScreen) => {
+    // Copy the screen preview URL (shows all ads for that screen)
+    const url = `${window.location.origin}/ad/${ad.screen_id}`
     navigator.clipboard.writeText(url)
-    alert("Ad link copied to clipboard!")
+    alert("Screen preview link copied to clipboard!")
   }
 
   return (
@@ -233,6 +236,7 @@ const deleteAdvertisement = async (adId: string) => {
                   <TableHead>Preview</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Screen</TableHead>
+                  <TableHead>Duration</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -263,6 +267,10 @@ const deleteAdvertisement = async (adId: string) => {
                       </div>
                     </TableCell>
 
+                    <TableCell className="text-gray-500">
+                      {(ad.duration && ad.duration > 0) ? `${ad.duration}s` : '10s (default)'}
+                    </TableCell>
+
                     <TableCell className="text-gray-500">{formatDate(ad.created_at)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -270,9 +278,9 @@ const deleteAdvertisement = async (adId: string) => {
                           <Eye size={14} />
                           Preview
                         </Button>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={() => handleCopy(ad.id)}>
+                        <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={() => handleCopy(ad)}>
                           <Edit size={14} />
-                          Copy
+                          Copy Link
                         </Button>
                         <Button
                           variant="outline"
