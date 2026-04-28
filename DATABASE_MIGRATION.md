@@ -39,6 +39,20 @@ FROM (
 WHERE adease_ads.id = sub.id;
 ```
 
+## Slot-based Scheduling (hourly)
+
+Add a column to store daily hour slots (0–23) for each ad:
+
+```sql
+-- Store daily hour slots (array of integers 0–23)
+ALTER TABLE adease_ads
+ADD COLUMN IF NOT EXISTS slot_hours integer[];
+```
+
+Notes:
+- Hours are interpreted in the user's local/browser time.
+- To avoid conflicts, ensure new ads do not reuse hours already taken for the same `screen_id`.
+
 ## New Features
 
 1. **Duration-based Ad Rotation**: Ads automatically rotate based on their specified duration

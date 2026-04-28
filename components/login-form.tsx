@@ -25,15 +25,15 @@ export default function LoginForm() {
       email,
       password,
     })
-    
+
     setIsLoading(false)
     if (error) {
       setError(error.message)
       return
     }
-    
+
     if (data.session) {
-      localStorage.setItem("@session_id", JSON.stringify(data.session));
+      localStorage.setItem("@session_id", JSON.stringify(data.session))
     }
     router.push("/dashboard")
   }

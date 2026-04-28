@@ -59,7 +59,7 @@ export default function AdvertisementsPage() {
   }, [])
 
   // Fetch advertisements from Supabase
-  const fetchAdvertisements = async () => {
+  const fetchAdvertisements = async (screensList: Screen[] = screens) => {
     const { data, error } = await supabase
       .from('adease_ads')
       .select('*')
@@ -69,14 +69,16 @@ export default function AdvertisementsPage() {
     } else if (data) {
       // Join with screens for display
       const adsWithScreen = data.map((ad: Advertisement) => {
-        const screen = screens.find((s) => s.id === ad.screen_id)
+        const screen = screensList.find((s) => s.id === ad.screen_id)
         return {
           ...ad,
           screenTitle: screen?.title || "Unknown Screen",
           screenStatus: screen?.is_active || false,
         }
       })
-      setAdvertisements(adsWithScreen)
+      // Defensive: if query ever returns duplicates, avoid duplicated rows in UI
+      const uniqueAds = Array.from(new Map(adsWithScreen.map((ad) => [ad.id, ad])).values())
+      setAdvertisements(uniqueAds)
     }
   }
 
@@ -85,8 +87,7 @@ export default function AdvertisementsPage() {
   }, [screens])
 
   const handleAddAdvertisement = async () => {
-    // Refresh screens to get any newly created screens
-    await fetchScreens()
+    // Refresh ads (avoid double-fetch via screens effect)
     await fetchAdvertisements()
     setIsModalOpen(false)
   }

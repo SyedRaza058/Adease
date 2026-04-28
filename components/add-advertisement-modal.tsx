@@ -42,11 +42,11 @@ interface AddAdvertisementModalProps {
 export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, screens }: AddAdvertisementModalProps) {
   const [title, setTitle] = useState("")
   const [selectedScreen, setSelectedScreen] = useState("")
-  const [imageFiles, setImageFiles] = useState<File[]>([])
-  const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageUrl, setImageUrl] = useState<string>("")
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [duration, setDuration] = useState("10") // Default 10 seconds
-  const [startTime, setStartTime] = useState("")
-  const [endTime, setEndTime] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ [key: number]: number }>({})
 
@@ -56,79 +56,77 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
-    
-    const newFiles = Array.from(files)
-    setImageFiles(prev => [...prev, ...newFiles])
-    
-    // Upload all files
-    const uploadPromises = newFiles.map(async (file, index) => {
-      const fileIndex = imageFiles.length + index
-      const filePath = `ads/${Date.now()}_${fileIndex}_${file.name}`
-      
-      try {
-        const { error } = await supabase.storage.from('adease').upload(filePath, file)
-        if (error) {
-          console.error("Failed to upload image:", error.message)
-          throw error
-        }
-        const { data } = supabase.storage.from('adease').getPublicUrl(filePath)
-        return data.publicUrl
-      } catch (error) {
-        console.error(`Failed to upload ${file.name}:`, error)
-        return null
+
+    const file = files[0]
+    setImageFile(file)
+
+    setUploadError(null)
+    setIsUploading(true)
+
+    const filePath = `ads/${Date.now()}_${file.name}`
+    try {
+      const { error } = await supabase.storage.from("adease").upload(filePath, file)
+      if (error) {
+        console.error("Failed to upload image:", error.message)
+        throw error
       }
-    })
-    
-    const uploadedUrls = await Promise.all(uploadPromises)
-    const validUrls = uploadedUrls.filter(url => url !== null) as string[]
-    setImageUrls(prev => [...prev, ...validUrls])
+      const { data } = supabase.storage.from("adease").getPublicUrl(filePath)
+      setImageUrl(data.publicUrl)
+    } catch (error) {
+      console.error(`Failed to upload ${file.name}:`, error)
+      setImageUrl("")
+      setUploadError(
+        "Upload failed. Make sure Storage bucket `adease` exists and your Storage policies allow uploads.",
+      )
+    }
+
+    setIsUploading(false)
   }
 
-  const removeImage = (index: number) => {
-    setImageFiles(prev => prev.filter((_, i) => i !== index))
-    setImageUrls(prev => prev.filter((_, i) => i !== index))
+  const removeImage = () => {
+    setImageFile(null)
+    setImageUrl("")
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (imageUrls.length === 0) {
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData.user) {
+      alert("You must be signed in to create an advertisement.")
+      return
+    }
+    if (isUploading) {
+      alert("Please wait for the image upload to finish.")
+      return
+    }
+    if (!imageUrl) {
       alert("Please upload at least one image.")
       return
     }
     setIsSubmitting(true)
     
     try {
-      // Prepare ads data - one ad per image
-      const adsToInsert = imageUrls.map((imageUrl, index) => {
-        const adData: any = {
-          title: imageUrls.length > 1 ? `${title} (${index + 1})` : title,
-          screen_id: selectedScreen,
-          image_url: imageUrl,
-        }
-        
-        // Only add optional fields if they have values
-        // This prevents errors if columns don't exist in database yet
-        const durationValue = parseInt(duration)
-        if (durationValue && durationValue > 0) {
-          adData.duration = durationValue
-        }
-        
-        if (startTime) {
-          adData.start_time = startTime
-        }
-        
-        if (endTime) {
-          adData.end_time = endTime
-        }
-        
-        // Note: display_order is not included to avoid errors if column doesn't exist
-        // It can be added later via migration if needed
-        
-        return adData
-      })
-      
-      // Insert all ads into Supabase
-      const { error } = await supabase.from('adease_ads').insert(adsToInsert)
+      // Enforce one ad per screen: remove older ads first
+      const { error: deleteError } = await supabase.from("adease_ads").delete().eq("screen_id", selectedScreen)
+      if (deleteError) {
+        console.error("Failed to replace existing ads:", deleteError.message)
+        alert(`Failed to replace existing ads: ${deleteError.message}`)
+        setIsSubmitting(false)
+        return
+      }
+
+      const adToInsert: any = {
+        title,
+        screen_id: selectedScreen,
+        image_url: imageUrl,
+      }
+
+      const durationValue = parseInt(duration)
+      if (durationValue && durationValue > 0) {
+        adToInsert.duration = durationValue
+      }
+
+      const { error } = await supabase.from("adease_ads").insert([adToInsert])
       
       if (error) {
         console.error("Failed to create advertisement:", error.message)
@@ -140,11 +138,9 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
       // Reset form
       setTitle("")
       setSelectedScreen("")
-      setImageFiles([])
-      setImageUrls([])
+      setImageFile(null)
+      setImageUrl("")
       setDuration("10")
-      setStartTime("")
-      setEndTime("")
       setIsSubmitting(false)
       onSubmit() // trigger parent to refresh ads
     } catch (error: any) {
@@ -158,11 +154,9 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
     if (!isSubmitting) {
       setTitle("")
       setSelectedScreen("")
-      setImageFiles([])
-      setImageUrls([])
+      setImageFile(null)
+      setImageUrl("")
       setDuration("10")
-      setStartTime("")
-      setEndTime("")
       onClose()
     }
   }
@@ -219,41 +213,40 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="image">Advertisement Images (Multiple allowed)</Label>
+                <Label htmlFor="image">Advertisement Image</Label>
                 <Input
                   id="image"
                   type="file"
                   accept="image/*"
-                  multiple
                   onChange={handleFileChange}
-                  required={imageUrls.length === 0}
+                  required={!imageUrl}
+                  disabled={isSubmitting || isUploading}
                 />
-                <p className="text-xs text-gray-500">Pick one or more images to upload. Each image will create a separate ad.</p>
+                <p className="text-xs text-gray-500">Pick one image to upload.</p>
+
+                {isUploading && (
+                  <p className="text-xs text-blue-600">Uploading images…</p>
+                )}
+                {uploadError && (
+                  <p className="text-xs text-red-600">{uploadError}</p>
+                )}
                 
-                {imageUrls.length > 0 && (
+                {imageUrl && (
                   <div className="mt-4 space-y-2">
-                    <p className="text-sm font-medium">Uploaded Images ({imageUrls.length})</p>
-                    <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                      {imageUrls.map((url, index) => (
-                        <div key={index} className="relative group">
-                          <div className="aspect-video bg-gray-100 rounded-md overflow-hidden">
-                            <img
-                              src={url}
-                              alt={`Preview ${index + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeImage(index)}
-                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
+                    <p className="text-sm font-medium">Uploaded Image</p>
+                    <div className="relative group max-w-[260px]">
+                      <div className="aspect-video bg-gray-100 rounded-md overflow-hidden">
+                        <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeImage}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -273,36 +266,14 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
                 />
                 <p className="text-xs text-gray-500">How long each ad should display (5-300 seconds)</p>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="startTime">Schedule Start Time (Optional)</Label>
-                <Input
-                  id="startTime"
-                  type="datetime-local"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                />
-                <p className="text-xs text-gray-500">When should these ads start displaying? Leave empty for immediate start.</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="endTime">Schedule End Time (Optional)</Label>
-                <Input
-                  id="endTime"
-                  type="datetime-local"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                />
-                <p className="text-xs text-gray-500">When should these ads stop displaying? Leave empty for no end time.</p>
-              </div>
             </div>
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Creating..." : "Create Advertisement"}
+              <Button type="submit" disabled={isSubmitting || isUploading}>
+                {isUploading ? "Uploading..." : isSubmitting ? "Creating..." : "Create Advertisement"}
               </Button>
             </DialogFooter>
           </form>
