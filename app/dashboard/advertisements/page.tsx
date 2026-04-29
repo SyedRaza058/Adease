@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { ImageIcon, Plus, Eye, Edit, Trash2 } from "lucide-react"
+import { ImageIcon, Plus, Eye, Link2, Trash2, Clock, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
 import AddAdvertisementModal from "@/components/add-advertisement-modal"
 import { supabase } from "@/lib/utils"
 
@@ -27,7 +29,17 @@ interface Advertisement {
 
 interface AdvertisementWithScreen extends Advertisement {
   screenTitle: string
+  screenLocation: string
   screenStatus: boolean
+}
+
+interface ScreenGroup {
+  screenId: string
+  screenTitle: string
+  screenLocation: string
+  screenStatus: boolean
+  ads: AdvertisementWithScreen[]
+  totalDuration: number
 }
 
 export default function AdvertisementsPage() {
@@ -35,14 +47,14 @@ export default function AdvertisementsPage() {
   const [screens, setScreens] = useState<Screen[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [, setLoadingScreens] = useState(false)
+  const [selectedGroup, setSelectedGroup] = useState<ScreenGroup | null>(null)
 
-  // Fetch screens from Supabase
   const fetchScreens = async () => {
     setLoadingScreens(true)
     const { data, error } = await supabase
-      .from('adease_screens')
-      .select('*')
-      .order('created_at', { ascending: false })
+      .from("adease_screens")
+      .select("*")
+      .order("created_at", { ascending: false })
     if (error) {
       console.error("Failed to fetch screens:", error.message)
     } else if (data) {
@@ -59,7 +71,7 @@ export default function AdvertisementsPage() {
     const { data, error } = await supabase
       .from("adease_ads")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: true })
     if (error) {
       console.error("Failed to fetch advertisements:", error.message)
     } else if (data) {
@@ -68,11 +80,11 @@ export default function AdvertisementsPage() {
         return {
           ...ad,
           screenTitle: screen?.title || "Unknown Screen",
+          screenLocation: screen?.location || "",
           screenStatus: screen?.is_active || false,
         }
       })
-      const uniqueAds = Array.from(new Map(adsWithScreen.map((ad) => [ad.id, ad])).values())
-      setAdvertisements(uniqueAds)
+      setAdvertisements(adsWithScreen)
     }
   }, [])
 
@@ -80,69 +92,130 @@ export default function AdvertisementsPage() {
     if (screens.length > 0) void fetchAdvertisements(screens)
   }, [screens, fetchAdvertisements])
 
+  // Group ads by screen
+  const screenGroups: ScreenGroup[] = Object.values(
+    advertisements.reduce<Record<string, ScreenGroup>>((acc, ad) => {
+      if (!acc[ad.screen_id]) {
+        acc[ad.screen_id] = {
+          screenId: ad.screen_id,
+          screenTitle: ad.screenTitle,
+          screenLocation: ad.screenLocation,
+          screenStatus: ad.screenStatus,
+          ads: [],
+          totalDuration: 0,
+        }
+      }
+      acc[ad.screen_id].ads.push(ad)
+      acc[ad.screen_id].totalDuration += ad.duration > 0 ? ad.duration : 10
+      return acc
+    }, {})
+  )
+
   const handleAddAdvertisement = async () => {
     await fetchAdvertisements(screens)
     setIsModalOpen(false)
+    // Refresh selected group if open
+    setSelectedGroup(null)
   }
 
-  const deleteAdvertisement = async (adId: string) => {
-    if (!confirm("Are you sure you want to delete this advertisement?")) {
-      return
-    }
-
-    const { error } = await supabase.from("adease_ads").delete().eq("id", adId)
-
+  const deleteAllAdsForScreen = async (screenId: string, screenTitle: string) => {
+    if (!confirm(`Delete all advertisements for "${screenTitle}"? This cannot be undone.`)) return
+    const { error } = await supabase.from("adease_ads").delete().eq("screen_id", screenId)
     if (error) {
-      console.error("Failed to delete ad:", error.message)
-      alert("Failed to delete advertisement. Please try again.")
+      alert("Failed to delete advertisements. Please try again.")
       return
     }
-
-    const updatedAds = advertisements.filter((ad) => ad.id !== adId)
-    setAdvertisements(updatedAds)
+    setAdvertisements((prev) => prev.filter((ad) => ad.screen_id !== screenId))
+    setSelectedGroup(null)
   }
 
+  const deleteSingleAd = async (adId: string) => {
+    if (!confirm("Delete this ad?")) return
+    const { error } = await supabase.from("adease_ads").delete().eq("id", adId)
+    if (error) { alert("Failed to delete ad."); return }
+    setAdvertisements((prev) => prev.filter((ad) => ad.id !== adId))
+    // Update selected group
+    setSelectedGroup((prev) => {
+      if (!prev) return null
+      const updatedAds = prev.ads.filter((ad) => ad.id !== adId)
+      if (updatedAds.length === 0) return null
+      return {
+        ...prev,
+        ads: updatedAds,
+        totalDuration: updatedAds.reduce((sum, ad) => sum + (ad.duration > 0 ? ad.duration : 10), 0),
+      }
+    })
+  }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
+  const handlePreview = async (screenId: string, screenStatus: boolean) => {
+    if (!screenStatus) { alert("Screen is not Active"); return }
+
+    const url = `${window.location.origin}/ad/${screenId}`
+
+    // Default to right-side secondary monitor (primary width = start of secondary)
+    let x = window.screen.width, y = 0
+    let width = window.screen.width, height = window.screen.height
+
+    // Window Management API gives exact per-display coordinates (Chrome 100+, works on localhost)
+    if ("getScreenDetails" in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const details = await (window as any).getScreenDetails()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sec = details.screens.find((s: any) => !s.isPrimary)
+        if (sec) { x = sec.left; y = sec.top; width = sec.width; height = sec.height }
+      } catch {
+        // Permission denied — use offset fallback above
+      }
+    }
+
+    // Server-side exec: Next.js runs on the same Windows machine so Chrome launches locally
+    await fetch("/api/launch-display", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, x, y, width, height }),
+    })
+  }
+
+  const handleCopyLink = async (screenId: string) => {
+    const url = `${window.location.origin}/ad/${screenId}`
+    try {
+      await navigator.clipboard.writeText(url)
+      alert("Screen preview link copied to clipboard!")
+    } catch {
+      // Fallback for HTTP or browsers that block clipboard API
+      const textarea = document.createElement("textarea")
+      textarea.value = url
+      textarea.style.position = "fixed"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+      try {
+        document.execCommand("copy")
+        alert("Screen preview link copied to clipboard!")
+      } catch {
+        alert(`Could not copy automatically. Please copy this link manually:\n\n${url}`)
+      }
+      document.body.removeChild(textarea)
+    }
+  }
+
+  const formatDuration = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return s > 0 ? `${m}m ${s}s` : `${m}m`
+  }
+
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     })
-  }
-
-  const getAdvertisementsByScreen = (screenId: string) => {
-    return advertisements.filter((ad) => ad.screen_id === screenId)
-  }
-
-  const handlePreview = async (ad: AdvertisementWithScreen) => {
-    // Refresh screens to ensure we have the latest data
-    const { data: screensData, error } = await supabase
-      .from('adease_screens')
-      .select('*')
-      .eq('id', ad.screen_id)
-      .single()
-    
-    if (error || !screensData) {
-      alert('Screen not found for this advertisement. Please refresh the page.')
-      return
-    }
-    
-    if(!screensData.is_active) {
-      alert('Screen is not Active')
-      return
-    }
-    // Use screen_id instead of ad_id to show all ads for the screen
-    window.open(`/ad/${ad.screen_id}`, "_blank")
-  }
-  const handleCopy = (ad: AdvertisementWithScreen) => {
-    // Copy the screen preview URL (shows all ads for that screen)
-    const url = `${window.location.origin}/ad/${ad.screen_id}`
-    navigator.clipboard.writeText(url)
-    alert("Screen preview link copied to clipboard!")
-  }
 
   return (
     <div className="space-y-4">
@@ -152,10 +225,7 @@ export default function AdvertisementsPage() {
           <p className="mt-1 text-sm text-muted-foreground">Manage advertisements across all your screens</p>
         </div>
         <Button
-          onClick={async () => {
-            await fetchScreens()
-            setIsModalOpen(true)
-          }}
+          onClick={async () => { await fetchScreens(); setIsModalOpen(true) }}
           className="shrink-0 bg-[#ED7614] hover:bg-orange-500 cursor-pointer"
         >
           <Plus className="mr-2 h-4 w-4" />
@@ -195,23 +265,22 @@ export default function AdvertisementsPage() {
             <div className="h-4 w-4 shrink-0 rounded-full bg-blue-500" />
           </CardHeader>
           <CardContent className="pt-1">
-            <div className="text-lg font-bold tabular-nums">
-              {new Set(advertisements.map((ad) => ad.screen_id)).size}
-            </div>
+            <div className="text-lg font-bold tabular-nums">{screenGroups.length}</div>
             <p className="mt-1 text-sm text-muted-foreground">Out of {screens.length} total screens</p>
           </CardContent>
         </Card>
       </div>
 
+      {/* Grouped Table */}
       <Card>
         <CardHeader className="pb-1">
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
             <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            All Advertisements ({advertisements.length})
+            All Advertisements ({screenGroups.length} screen{screenGroups.length !== 1 ? "s" : ""})
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          {advertisements.length === 0 ? (
+          {screenGroups.length === 0 ? (
             <div className="py-6 text-center">
               <ImageIcon className="mx-auto h-8 w-8 text-muted-foreground opacity-75" />
               <h3 className="mt-2 text-sm font-medium">No advertisements created yet</h3>
@@ -219,10 +288,7 @@ export default function AdvertisementsPage() {
                 Create your first advertisement to display on your screens.
               </p>
               <Button
-                onClick={async () => {
-                  await fetchScreens()
-                  setIsModalOpen(true)
-                }}
+                onClick={async () => { await fetchScreens(); setIsModalOpen(true) }}
                 className="mt-4 bg-[#ED7614] hover:bg-orange-500 cursor-pointer"
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -234,64 +300,105 @@ export default function AdvertisementsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Preview</TableHead>
-                  <TableHead>Title</TableHead>
                   <TableHead>Screen</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Ads</TableHead>
+                  <TableHead>Total Duration</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {advertisements.map((ad) => (
-                  <TableRow key={ad.id}>
+                {screenGroups.map((group) => (
+                  <TableRow
+                    key={group.screenId}
+                    className="cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => setSelectedGroup(group)}
+                  >
+                    {/* Stacked thumbnails */}
                     <TableCell>
-                      <div className="h-10 w-16 overflow-hidden rounded-md bg-muted">
-                        {/* eslint-disable-next-line @next/next/no-img-element -- dynamic remote ad URLs */}
-                        <img
-                          src={ad.image_url || "/placeholder.svg"}
-                          alt={ad.title}
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement
-                            target.src = "/placeholder.svg?height=40&width=64"
-                          }}
-                        />
+                      <div className="relative h-10 w-16">
+                        {group.ads.slice(0, 3).map((ad, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={ad.id}
+                            src={ad.image_url || "/placeholder.svg"}
+                            alt={ad.title}
+                            className="absolute h-10 w-16 rounded-md object-cover border-2 border-background"
+                            style={{ left: i * 6, zIndex: 3 - i, opacity: 1 - i * 0.2 }}
+                            onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg" }}
+                          />
+                        ))}
+                        {group.ads.length > 3 && (
+                          <div
+                            className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-[#ED7614] text-[10px] font-bold text-white"
+                            style={{ zIndex: 10 }}
+                          >
+                            +{group.ads.length - 3}
+                          </div>
+                        )}
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium">{ad.title}</TableCell>
+
+                    {/* Screen info */}
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-medium">{ad.screenTitle}</span>
-                        <span className="text-sm text-muted-foreground">
-                          {getAdvertisementsByScreen(ad.screen_id).length} ads on this screen
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <div
+                            className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                              group.screenStatus ? "bg-green-500" : "bg-red-500"
+                            }`}
+                          />
+                          <span className="font-medium">{group.screenTitle}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground ml-3.5">{group.screenLocation}</span>
                       </div>
                     </TableCell>
 
-                    <TableCell className="text-muted-foreground">
-                      {(ad.duration && ad.duration > 0) ? `${ad.duration}s` : '10s (default)'}
+                    {/* Ad count */}
+                    <TableCell>
+                      <Badge variant="secondary" className="font-medium">
+                        {group.ads.length} ad{group.ads.length !== 1 ? "s" : ""}
+                      </Badge>
                     </TableCell>
 
-                    <TableCell className="text-muted-foreground">{formatDate(ad.created_at)}</TableCell>
-                    <TableCell className="text-right">
+                    {/* Total duration */}
+                    <TableCell>
+                      <div className="flex items-center gap-1 text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span className="text-sm">{formatDuration(group.totalDuration)} loop</span>
+                      </div>
+                    </TableCell>
+
+                    {/* Actions */}
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="-mr-2 flex flex-wrap items-center justify-end gap-1.5">
-                        <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={() => handlePreview(ad)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-1"
+                          onClick={() => handlePreview(group.screenId, group.screenStatus)}
+                        >
                           <Eye className="h-4 w-4" />
                           Preview
                         </Button>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={() => handleCopy(ad)}>
-                          <Edit className="h-4 w-4" />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-1"
+                          onClick={() => handleCopyLink(group.screenId)}
+                        >
+                          <Link2 className="h-4 w-4" />
                           Copy Link
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => deleteAdvertisement(ad.id)}
                           className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                          onClick={() => deleteAllAdsForScreen(group.screenId, group.screenTitle)}
                         >
                           <Trash2 className="h-4 w-4" />
-                          Delete
+                          Delete All
                         </Button>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -301,6 +408,110 @@ export default function AdvertisementsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Detail Dialog */}
+      <Dialog open={!!selectedGroup} onOpenChange={(open) => { if (!open) setSelectedGroup(null) }}>
+        <DialogContent className="sm:max-w-[640px] max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-6">
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <div
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      selectedGroup?.screenStatus ? "bg-green-500" : "bg-red-500"
+                    }`}
+                  />
+                  {selectedGroup?.screenTitle}
+                </DialogTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {selectedGroup?.ads.length} ad{selectedGroup?.ads.length !== 1 ? "s" : ""} &middot;{" "}
+                  {selectedGroup && formatDuration(selectedGroup.totalDuration)} total loop
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => selectedGroup && handleCopyLink(selectedGroup.screenId)}
+                >
+                  <Link2 className="mr-1 h-3.5 w-3.5" />
+                  Copy Link
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-[#ED7614] hover:bg-orange-500"
+                  onClick={() =>
+                    selectedGroup && handlePreview(selectedGroup.screenId, selectedGroup.screenStatus)
+                  }
+                >
+                  <Eye className="mr-1 h-3.5 w-3.5" />
+                  Preview
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="overflow-y-auto flex-1 mt-2 space-y-2 pr-1">
+            {selectedGroup?.ads.map((ad, idx) => (
+              <div key={ad.id} className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                {/* Order */}
+                <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                  {idx + 1}
+                </div>
+
+                {/* Thumbnail */}
+                <div className="h-14 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={ad.image_url || "/placeholder.svg"}
+                    alt={ad.title}
+                    className="h-full w-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg" }}
+                  />
+                </div>
+
+                {/* Info */}
+                <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+                  <p className="truncate font-medium text-sm">{ad.title}</p>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    <span>{ad.duration > 0 ? ad.duration : 10}s display time</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{formatDate(ad.created_at)}</p>
+                </div>
+
+                {/* Delete single ad */}
+                <button
+                  type="button"
+                  onClick={() => deleteSingleAd(ad.id)}
+                  className="flex-shrink-0 text-muted-foreground hover:text-red-500 transition-colors"
+                  title="Remove this ad"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-3 border-t flex items-center justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-red-600 hover:text-red-700"
+              onClick={() =>
+                selectedGroup &&
+                deleteAllAdsForScreen(selectedGroup.screenId, selectedGroup.screenTitle)
+              }
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" />
+              Delete All Ads
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Ads play in order shown above, then loop
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AddAdvertisementModal
         isOpen={isModalOpen}
