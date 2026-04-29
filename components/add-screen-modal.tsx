@@ -6,7 +6,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import {
   Dialog,
   DialogContent,
@@ -65,7 +64,7 @@ export default function AddScreenModal({ isOpen, onClose, onSubmit }: AddScreenM
         </DialogHeader>
 
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-2 py-2">
             <div className="space-y-2">
               <Label htmlFor="title">Screen Title</Label>
               <Input

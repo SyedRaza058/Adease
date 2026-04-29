@@ -75,14 +75,14 @@ export default function AdPreviewPage() {
 
   if (loading)
     return (
-      <div className="flex items-center justify-center w-screen h-screen bg-black text-white text-xl">
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-white">
         Loading...
       </div>
     )
 
   if (ads.length === 0)
     return (
-      <div className="flex items-center justify-center w-screen h-screen bg-black text-red-500 text-xl">
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-red-500">
         No ads found for this screen.
       </div>
     )
@@ -90,12 +90,14 @@ export default function AdPreviewPage() {
   const currentAd = ads[currentAdIndex]
 
   return (
-    <div className="fixed inset-0 m-0 p-0 w-screen h-screen bg-black overflow-hidden">
+    <div className="fixed inset-0 m-0 h-screen w-screen overflow-hidden bg-black p-0">
+      {/* Full-bleed slideshow: native img avoids Next remote config for arbitrary ad URLs */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        key={currentAd.id} // Key forces re-render on change
+        key={currentAd.id}
         src={currentAd.image_url || "/placeholder.svg"}
         alt={currentAd.title}
-        className="w-full h-full object-contain md:object-contain transition-opacity duration-500"
+        className="h-full w-full object-contain transition-opacity duration-500 md:object-contain"
       />
     </div>
   )

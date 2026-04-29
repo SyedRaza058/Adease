@@ -7,14 +7,7 @@ import { ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { supabase } from "@/lib/utils"
 
@@ -23,13 +16,7 @@ interface Screen {
   title: string
   location: string
   type: string
-  is_active: boolean
-}
-
-interface Advertisement {
-  title: string
-  screenId: string
-  imageUrl: string
+  is_active?: boolean
 }
 
 interface AddAdvertisementModalProps {
@@ -42,23 +29,17 @@ interface AddAdvertisementModalProps {
 export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, screens }: AddAdvertisementModalProps) {
   const [title, setTitle] = useState("")
   const [selectedScreen, setSelectedScreen] = useState("")
-  const [imageFile, setImageFile] = useState<File | null>(null)
   const [imageUrl, setImageUrl] = useState<string>("")
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [duration, setDuration] = useState("10") // Default 10 seconds
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<{ [key: number]: number }>({})
-
-  // Find the selected screen object for display
-  const selectedScreenObj = screens.find(s => s.id === selectedScreen)
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
 
     const file = files[0]
-    setImageFile(file)
 
     setUploadError(null)
     setIsUploading(true)
@@ -84,7 +65,6 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
   }
 
   const removeImage = () => {
-    setImageFile(null)
     setImageUrl("")
   }
 
@@ -115,13 +95,17 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
         return
       }
 
-      const adToInsert: any = {
+      const durationValue = parseInt(duration, 10)
+      const adToInsert: {
+        title: string
+        screen_id: string
+        image_url: string
+        duration?: number
+      } = {
         title,
         screen_id: selectedScreen,
         image_url: imageUrl,
       }
-
-      const durationValue = parseInt(duration)
       if (durationValue && durationValue > 0) {
         adToInsert.duration = durationValue
       }
@@ -138,14 +122,14 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
       // Reset form
       setTitle("")
       setSelectedScreen("")
-      setImageFile(null)
       setImageUrl("")
       setDuration("10")
       setIsSubmitting(false)
       onSubmit() // trigger parent to refresh ads
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error creating ads:", error)
-      alert(`Error: ${error.message || "Failed to create advertisement"}`)
+      const message = error instanceof Error ? error.message : "Failed to create advertisement"
+      alert(`Error: ${message}`)
       setIsSubmitting(false)
     }
   }
@@ -154,7 +138,6 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
     if (!isSubmitting) {
       setTitle("")
       setSelectedScreen("")
-      setImageFile(null)
       setImageUrl("")
       setDuration("10")
       onClose()
@@ -170,17 +153,17 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
         </DialogHeader> */}
 
         {screens.length === 0 ? (
-          <div className="text-center p-6">
-            <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-4 text-lg font-medium">No screens available</h3>
-            <p className="mt-2 text-gray-500">You need to add at least one screen before creating advertisements.</p>
+          <div className="py-3 text-center">
+            <ImageIcon className="mx-auto h-7 w-7 text-muted-foreground opacity-75" />
+            <h3 className="mt-2 text-sm font-medium">No screens available</h3>
+            <p className="mt-1 text-sm text-muted-foreground">You need to add at least one screen before creating advertisements.</p>
             {/* <Button asChild className="mt-4 bg-[#ED7614] hover:bg-orange-500 cursor-pointer" onClick={handleClose} >
               <a href="/dashboard/screens">Add Screen</a>
             </Button> */}
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-2 py-2">
               <div className="space-y-2">
                 <Label htmlFor="title">Advertisement Title</Label>
                 <Input
@@ -204,7 +187,7 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
                         <div className="flex items-center gap-2 w-full">
                           <div className={`h-2 w-2 rounded-full flex-shrink-0 ${screen.is_active ? "bg-green-500" : "bg-red-500"}`} />
                           <span className="truncate">{screen.title}</span>
-                          <span className="text-xs text-gray-500 truncate">({screen.location})</span>
+                          <span className="truncate text-xs text-muted-foreground">({screen.location})</span>
                         </div>
                       </SelectItem>
                     ))}
@@ -222,7 +205,7 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
                   required={!imageUrl}
                   disabled={isSubmitting || isUploading}
                 />
-                <p className="text-xs text-gray-500">Pick one image to upload.</p>
+                <p className="text-xs text-muted-foreground">Pick one image to upload.</p>
 
                 {isUploading && (
                   <p className="text-xs text-blue-600">Uploading images…</p>
@@ -234,9 +217,10 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
                 {imageUrl && (
                   <div className="mt-4 space-y-2">
                     <p className="text-sm font-medium">Uploaded Image</p>
-                    <div className="relative group max-w-[260px]">
-                      <div className="aspect-video bg-gray-100 rounded-md overflow-hidden">
-                        <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                    <div className="group relative max-w-[260px]">
+                      <div className="aspect-video overflow-hidden rounded-md bg-muted">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- blob: or remote preview */}
+                        <img src={imageUrl} alt="Preview" className="h-full w-full object-cover" />
                       </div>
                       <button
                         type="button"
@@ -264,7 +248,7 @@ export default function AddAdvertisementModal({ isOpen, onClose, onSubmit, scree
                   placeholder="10"
                   required
                 />
-                <p className="text-xs text-gray-500">How long each ad should display (5-300 seconds)</p>
+                <p className="text-xs text-muted-foreground">How long each ad should display (5–300 seconds)</p>
               </div>
             </div>
 
