@@ -21,6 +21,45 @@ export default function AdPreviewPage() {
   const [ads, setAds] = useState<Ad[]>([])
   const [currentAdIndex, setCurrentAdIndex] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [screenActive, setScreenActive] = useState(true)
+
+  // Fetch screen status and subscribe to real-time changes
+  useEffect(() => {
+    if (!screenId) return
+
+    const fetchScreenStatus = async () => {
+      const { data } = await supabase
+        .from("adease_screens")
+        .select("is_active")
+        .eq("id", screenId)
+        .single()
+
+      if (data) setScreenActive(data.is_active)
+    }
+
+    fetchScreenStatus()
+
+    const channel = supabase
+      .channel(`screen-status-${screenId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "adease_screens",
+          filter: `id=eq.${screenId}`,
+        },
+        (payload) => {
+          const updated = payload.new as { is_active: boolean }
+          setScreenActive(updated.is_active)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [screenId])
 
   useEffect(() => {
     const fetchAds = async () => {
@@ -72,6 +111,9 @@ export default function AdPreviewPage() {
 
     return () => clearTimeout(timer)
   }, [ads, currentAdIndex])
+
+  if (!screenActive)
+    return <div className="fixed inset-0 bg-black" />
 
   if (loading)
     return (
